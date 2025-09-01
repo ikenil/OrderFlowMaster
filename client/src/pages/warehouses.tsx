@@ -212,6 +212,177 @@ export default function Warehouses() {
     );
   };
 
+  // Inventory management
+  const InventoryForm = ({ onClose }: { onClose: () => void }) => {
+    const form = useForm({
+      resolver: zodResolver(inventorySchema),
+      defaultValues: {
+        warehouseId: "",
+        productId: "",
+        quantity: 0,
+        minStockLevel: undefined,
+        maxStockLevel: undefined,
+      },
+    });
+
+    const createInventoryMutation = useMutation({
+      mutationFn: async (data: z.infer<typeof inventorySchema>) => {
+        const response = await apiRequest("POST", "/api/inventory", data);
+        return response.json();
+      },
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+        toast({
+          title: "Success",
+          description: "Product assigned to warehouse successfully",
+        });
+        onClose();
+        form.reset();
+      },
+      onError: (error) => {
+        if (isUnauthorizedError(error as Error)) {
+          toast({
+            title: "Unauthorized",
+            description: "You are logged out. Logging in again...",
+            variant: "destructive",
+          });
+          setTimeout(() => {
+            window.location.href = "/api/login";
+          }, 500);
+          return;
+        }
+        toast({
+          title: "Error",
+          description: "Failed to assign product to warehouse",
+          variant: "destructive",
+        });
+      },
+    });
+
+    const onSubmit = (data: z.infer<typeof inventorySchema>) => {
+      createInventoryMutation.mutate(data);
+    };
+
+    return (
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <FormField
+            control={form.control}
+            name="warehouseId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Warehouse *</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select warehouse" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {warehouses?.map((warehouse) => (
+                      <SelectItem key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="productId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Product *</FormLabel>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {products?.map((product) => (
+                      <SelectItem key={product.id} value={product.id}>
+                        {product.name} ({product.sku})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="quantity"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Initial Quantity *</FormLabel>
+                <FormControl>
+                  <Input 
+                    type="number" 
+                    placeholder="Enter quantity"
+                    {...field}
+                    onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              control={form.control}
+              name="minStockLevel"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Min Stock Level</FormLabel>
+                  <FormControl>
+                    <Input 
+                      type="number" 
+                      placeholder="Optional"
+                      {...field}
+                      onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="maxStockLevel"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Max Stock Level</FormLabel>
+                  <FormControl>
+                    <Input 
+                      type="number" 
+                      placeholder="Optional"
+                      {...field}
+                      onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+          <div className="flex justify-end space-x-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={createInventoryMutation.isPending}>
+              {createInventoryMutation.isPending ? "Assigning..." : "Assign Product"}
+            </Button>
+          </div>
+        </form>
+      </Form>
+    );
+  };
+
   // Product management
   const ProductForm = ({ product, onClose }: { product?: Product; onClose: () => void }) => {
     const form = useForm({
@@ -631,10 +802,23 @@ export default function Warehouses() {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button data-testid="button-add-inventory">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Stock
-                </Button>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button data-testid="button-add-inventory">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Assign Product
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Assign Product to Warehouse</DialogTitle>
+                      <DialogDescription>
+                        Add a product to a warehouse with initial stock quantity.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <InventoryForm onClose={() => {}} />
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 

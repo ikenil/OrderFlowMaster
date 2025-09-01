@@ -349,6 +349,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/inventory', isAuthenticated, async (req, res) => {
+    try {
+      const inventoryData = insertInventorySchema.parse(req.body);
+      const inventory = await storage.createInventory(inventoryData);
+      res.status(201).json(inventory);
+    } catch (error) {
+      console.error("Error creating inventory:", error);
+      res.status(400).json({ message: "Failed to assign product to warehouse" });
+    }
+  });
+
   app.put('/api/inventory', isAuthenticated, async (req, res) => {
     try {
       const { warehouseId, productId, quantity } = req.body;

@@ -101,6 +101,7 @@ export interface IStorage {
   
   // Inventory operations
   getInventory(warehouseId?: string): Promise<InventoryWithDetails[]>;
+  createInventory(inventoryData: InsertInventory): Promise<Inventory>;
   updateInventory(warehouseId: string, productId: string, quantity: number): Promise<Inventory>;
   getInventoryByWarehouse(warehouseId: string): Promise<InventoryWithDetails[]>;
   getLowStockItems(warehouseId?: string): Promise<InventoryWithDetails[]>;
@@ -646,6 +647,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Inventory operations
+  async createInventory(inventoryData: InsertInventory): Promise<Inventory> {
+    const [created] = await db
+      .insert(inventory)
+      .values(inventoryData)
+      .returning();
+    return created;
+  }
+
   async getInventory(warehouseId?: string): Promise<InventoryWithDetails[]> {
     let query = db
       .select()
