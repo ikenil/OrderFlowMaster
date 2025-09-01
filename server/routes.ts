@@ -2,7 +2,14 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertOrderSchema, insertExpenseSchema } from "@shared/schema";
+import { 
+  insertOrderSchema, 
+  insertExpenseSchema, 
+  insertWarehouseSchema,
+  insertProductSchema,
+  insertInventorySchema,
+  insertWarehousePermissionSchema
+} from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -212,6 +219,207 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating user status:", error);
       res.status(500).json({ message: "Failed to update user status" });
+    }
+  });
+
+  // Warehouse routes
+  app.get('/api/warehouses', isAuthenticated, async (req: any, res) => {
+    try {
+      const warehouses = await storage.getWarehouses(req.user.claims.sub);
+      res.json(warehouses);
+    } catch (error) {
+      console.error("Error fetching warehouses:", error);
+      res.status(500).json({ message: "Failed to fetch warehouses" });
+    }
+  });
+
+  app.post('/api/warehouses', isAuthenticated, async (req: any, res) => {
+    try {
+      const warehouseData = insertWarehouseSchema.parse(req.body);
+      const warehouse = await storage.createWarehouse(warehouseData, req.user.claims.sub);
+      res.status(201).json(warehouse);
+    } catch (error) {
+      console.error("Error creating warehouse:", error);
+      res.status(400).json({ message: "Invalid warehouse data" });
+    }
+  });
+
+  app.get('/api/warehouses/:id', isAuthenticated, async (req, res) => {
+    try {
+      const warehouse = await storage.getWarehouseById(req.params.id);
+      if (!warehouse) {
+        return res.status(404).json({ message: "Warehouse not found" });
+      }
+      res.json(warehouse);
+    } catch (error) {
+      console.error("Error fetching warehouse:", error);
+      res.status(500).json({ message: "Failed to fetch warehouse" });
+    }
+  });
+
+  app.patch('/api/warehouses/:id', isAuthenticated, async (req, res) => {
+    try {
+      const updates = insertWarehouseSchema.partial().parse(req.body);
+      const warehouse = await storage.updateWarehouse(req.params.id, updates);
+      res.json(warehouse);
+    } catch (error) {
+      console.error("Error updating warehouse:", error);
+      res.status(500).json({ message: "Failed to update warehouse" });
+    }
+  });
+
+  app.delete('/api/warehouses/:id', isAuthenticated, async (req, res) => {
+    try {
+      await storage.deleteWarehouse(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting warehouse:", error);
+      res.status(500).json({ message: "Failed to delete warehouse" });
+    }
+  });
+
+  // Product routes
+  app.get('/api/products', isAuthenticated, async (req, res) => {
+    try {
+      const warehouseId = req.query.warehouseId as string;
+      const products = await storage.getProducts(warehouseId);
+      res.json(products);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res.status(500).json({ message: "Failed to fetch products" });
+    }
+  });
+
+  app.post('/api/products', isAuthenticated, async (req: any, res) => {
+    try {
+      const productData = insertProductSchema.parse(req.body);
+      const product = await storage.createProduct(productData, req.user.claims.sub);
+      res.status(201).json(product);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      res.status(400).json({ message: "Invalid product data" });
+    }
+  });
+
+  app.get('/api/products/:id', isAuthenticated, async (req, res) => {
+    try {
+      const product = await storage.getProductById(req.params.id);
+      if (!product) {
+        return res.status(404).json({ message: "Product not found" });
+      }
+      res.json(product);
+    } catch (error) {
+      console.error("Error fetching product:", error);
+      res.status(500).json({ message: "Failed to fetch product" });
+    }
+  });
+
+  app.patch('/api/products/:id', isAuthenticated, async (req, res) => {
+    try {
+      const updates = insertProductSchema.partial().parse(req.body);
+      const product = await storage.updateProduct(req.params.id, updates);
+      res.json(product);
+    } catch (error) {
+      console.error("Error updating product:", error);
+      res.status(500).json({ message: "Failed to update product" });
+    }
+  });
+
+  app.delete('/api/products/:id', isAuthenticated, async (req, res) => {
+    try {
+      await storage.deleteProduct(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting product:", error);
+      res.status(500).json({ message: "Failed to delete product" });
+    }
+  });
+
+  // Inventory routes
+  app.get('/api/inventory', isAuthenticated, async (req, res) => {
+    try {
+      const warehouseId = req.query.warehouseId as string;
+      const inventory = await storage.getInventory(warehouseId);
+      res.json(inventory);
+    } catch (error) {
+      console.error("Error fetching inventory:", error);
+      res.status(500).json({ message: "Failed to fetch inventory" });
+    }
+  });
+
+  app.put('/api/inventory', isAuthenticated, async (req, res) => {
+    try {
+      const { warehouseId, productId, quantity } = req.body;
+      const inventory = await storage.updateInventory(warehouseId, productId, quantity);
+      res.json(inventory);
+    } catch (error) {
+      console.error("Error updating inventory:", error);
+      res.status(500).json({ message: "Failed to update inventory" });
+    }
+  });
+
+  app.get('/api/inventory/low-stock', isAuthenticated, async (req, res) => {
+    try {
+      const warehouseId = req.query.warehouseId as string;
+      const lowStockItems = await storage.getLowStockItems(warehouseId);
+      res.json(lowStockItems);
+    } catch (error) {
+      console.error("Error fetching low stock items:", error);
+      res.status(500).json({ message: "Failed to fetch low stock items" });
+    }
+  });
+
+  // Warehouse permissions routes
+  app.get('/api/warehouses/:id/permissions', isAuthenticated, async (req, res) => {
+    try {
+      const permissions = await storage.getWarehousePermissions(req.params.id);
+      res.json(permissions);
+    } catch (error) {
+      console.error("Error fetching warehouse permissions:", error);
+      res.status(500).json({ message: "Failed to fetch warehouse permissions" });
+    }
+  });
+
+  app.post('/api/warehouse-permissions', isAuthenticated, async (req, res) => {
+    try {
+      const permissionData = insertWarehousePermissionSchema.parse(req.body);
+      const permission = await storage.addWarehousePermission(permissionData);
+      res.status(201).json(permission);
+    } catch (error) {
+      console.error("Error adding warehouse permission:", error);
+      res.status(400).json({ message: "Invalid permission data" });
+    }
+  });
+
+  app.patch('/api/warehouse-permissions/:id', isAuthenticated, async (req, res) => {
+    try {
+      const { permission } = req.body;
+      const updated = await storage.updateWarehousePermission(req.params.id, permission);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating warehouse permission:", error);
+      res.status(500).json({ message: "Failed to update warehouse permission" });
+    }
+  });
+
+  app.delete('/api/warehouse-permissions/:id', isAuthenticated, async (req, res) => {
+    try {
+      await storage.removeWarehousePermission(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error removing warehouse permission:", error);
+      res.status(500).json({ message: "Failed to remove warehouse permission" });
+    }
+  });
+
+  // Warehouse analytics
+  app.get('/api/warehouses/:id/stats', isAuthenticated, async (req, res) => {
+    try {
+      const stats = await storage.getWarehouseStats(req.params.id);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching warehouse stats:", error);
+      res.status(500).json({ message: "Failed to fetch warehouse stats" });
     }
   });
 

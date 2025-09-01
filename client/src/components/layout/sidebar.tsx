@@ -8,13 +8,15 @@ import {
   Plug, 
   Users, 
   Settings,
-  LogOut
+  LogOut,
+  Package
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: ChartPie },
   { name: "Orders", href: "/orders", icon: ShoppingCart },
+  { name: "Warehouses", href: "/warehouses", icon: Package },
   { name: "Analytics", href: "/analytics", icon: BarChart },
   { name: "Expenses", href: "/expenses", icon: Receipt },
   { name: "Integrations", href: "/integrations", icon: Plug },

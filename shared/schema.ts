@@ -45,12 +45,16 @@ export const platformEnum = pgEnum('platform', ['amazon', 'flipkart', 'meesho', 
 export const paymentStatusEnum = pgEnum('payment_status', ['pending', 'paid', 'failed', 'refunded']);
 export const expenseStatusEnum = pgEnum('expense_status', ['pending', 'approved', 'rejected', 'paid']);
 export const expenseCategoryEnum = pgEnum('expense_category', ['marketing', 'shipping', 'packaging', 'office', 'travel', 'other']);
+export const warehousePermissionEnum = pgEnum('warehouse_permission', ['read', 'write', 'admin']);
+export const productCategoryEnum = pgEnum('product_category', ['electronics', 'clothing', 'books', 'home', 'beauty', 'sports', 'toys', 'other']);
 
 // Orders table
 export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   platformOrderId: varchar("platform_order_id").notNull(),
   platform: platformEnum("platform").notNull(),
+  warehouseId: varchar("warehouse_id").references(() => warehouses.id),
+  productId: varchar("product_id").references(() => products.id),
   customerName: varchar("customer_name").notNull(),
   customerEmail: varchar("customer_email"),
   customerPhone: varchar("customer_phone"),
@@ -96,14 +100,113 @@ export const orderStatusHistory = pgTable("order_status_history", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Warehouses table
+export const warehouses = pgTable("warehouses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  description: text("description"),
+  location: varchar("location"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Products table
+export const products = pgTable("products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  sku: varchar("sku").notNull().unique(),
+  description: text("description"),
+  category: productCategoryEnum("category").notNull().default('other'),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Inventory table - tracks product quantities per warehouse
+export const inventory = pgTable("inventory", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  warehouseId: varchar("warehouse_id").notNull().references(() => warehouses.id, { onDelete: 'cascade' }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: 'cascade' }),
+  quantity: integer("quantity").notNull().default(0),
+  reservedQuantity: integer("reserved_quantity").notNull().default(0), // for pending orders
+  minStockLevel: integer("min_stock_level").default(0),
+  maxStockLevel: integer("max_stock_level"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Warehouse permissions - role-based access to warehouses
+export const warehousePermissions = pgTable("warehouse_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  warehouseId: varchar("warehouse_id").notNull().references(() => warehouses.id, { onDelete: 'cascade' }),
+  permission: warehousePermissionEnum("permission").notNull().default('read'),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   submittedExpenses: many(expenses, { relationName: 'submittedExpenses' }),
   approvedExpenses: many(expenses, { relationName: 'approvedExpenses' }),
+  createdWarehouses: many(warehouses),
+  createdProducts: many(products),
+  warehousePermissions: many(warehousePermissions),
 }));
 
-export const ordersRelations = relations(orders, ({ many }) => ({
+export const warehousesRelations = relations(warehouses, ({ one, many }) => ({
+  createdByUser: one(users, {
+    fields: [warehouses.createdBy],
+    references: [users.id],
+  }),
+  inventory: many(inventory),
+  permissions: many(warehousePermissions),
+  orders: many(orders),
+}));
+
+export const productsRelations = relations(products, ({ one, many }) => ({
+  createdByUser: one(users, {
+    fields: [products.createdBy],
+    references: [users.id],
+  }),
+  inventory: many(inventory),
+  orders: many(orders),
+}));
+
+export const inventoryRelations = relations(inventory, ({ one }) => ({
+  warehouse: one(warehouses, {
+    fields: [inventory.warehouseId],
+    references: [warehouses.id],
+  }),
+  product: one(products, {
+    fields: [inventory.productId],
+    references: [products.id],
+  }),
+}));
+
+export const warehousePermissionsRelations = relations(warehousePermissions, ({ one }) => ({
+  user: one(users, {
+    fields: [warehousePermissions.userId],
+    references: [users.id],
+  }),
+  warehouse: one(warehouses, {
+    fields: [warehousePermissions.warehouseId],
+    references: [warehouses.id],
+  }),
+}));
+
+export const ordersRelations = relations(orders, ({ one, many }) => ({
   statusHistory: many(orderStatusHistory),
+  warehouse: one(warehouses, {
+    fields: [orders.warehouseId],
+    references: [warehouses.id],
+  }),
+  product: one(products, {
+    fields: [orders.productId],
+    references: [products.id],
+  }),
 }));
 
 export const expensesRelations = relations(expenses, ({ one }) => ({
@@ -158,6 +261,30 @@ export const insertOrderStatusHistorySchema = createInsertSchema(orderStatusHist
   createdAt: true,
 });
 
+export const insertWarehouseSchema = createInsertSchema(warehouses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+});
+
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  createdBy: true,
+});
+
+export const insertInventorySchema = createInsertSchema(inventory).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertWarehousePermissionSchema = createInsertSchema(warehousePermissions).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
@@ -168,6 +295,14 @@ export type InsertExpense = z.infer<typeof insertExpenseSchema>;
 export type Expense = typeof expenses.$inferSelect;
 export type InsertOrderStatusHistory = z.infer<typeof insertOrderStatusHistorySchema>;
 export type OrderStatusHistory = typeof orderStatusHistory.$inferSelect;
+export type InsertWarehouse = z.infer<typeof insertWarehouseSchema>;
+export type Warehouse = typeof warehouses.$inferSelect;
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type Product = typeof products.$inferSelect;
+export type InsertInventory = z.infer<typeof insertInventorySchema>;
+export type Inventory = typeof inventory.$inferSelect;
+export type InsertWarehousePermission = z.infer<typeof insertWarehousePermissionSchema>;
+export type WarehousePermission = typeof warehousePermissions.$inferSelect;
 
 // Extended types with relations
 export type OrderWithHistory = Order & {
@@ -177,4 +312,26 @@ export type OrderWithHistory = Order & {
 export type ExpenseWithUsers = Expense & {
   submittedByUser: User;
   approvedByUser?: User;
+};
+
+export type WarehouseWithDetails = Warehouse & {
+  createdByUser: User;
+  inventory: (Inventory & { product: Product })[];
+  permissions: (WarehousePermission & { user: User })[];
+};
+
+export type InventoryWithDetails = Inventory & {
+  warehouse: Warehouse;
+  product: Product;
+};
+
+export type ProductWithInventory = Product & {
+  createdByUser: User;
+  inventory: (Inventory & { warehouse: Warehouse })[];
+};
+
+export type OrderWithWarehouse = Order & {
+  statusHistory: OrderStatusHistory[];
+  warehouse?: Warehouse;
+  product?: Product;
 };

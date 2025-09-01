@@ -3,6 +3,10 @@ import {
   orders,
   expenses,
   orderStatusHistory,
+  warehouses,
+  products,
+  inventory,
+  warehousePermissions,
   type User,
   type UpsertUser,
   type InsertUser,
@@ -12,7 +16,19 @@ import {
   type InsertExpense,
   type ExpenseWithUsers,
   type OrderWithHistory,
+  type OrderWithWarehouse,
   type InsertOrderStatusHistory,
+  type Warehouse,
+  type InsertWarehouse,
+  type Product,
+  type InsertProduct,
+  type Inventory,
+  type InsertInventory,
+  type InventoryWithDetails,
+  type WarehousePermission,
+  type InsertWarehousePermission,
+  type WarehouseWithDetails,
+  type ProductWithInventory,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, gte, lte, count, sql } from "drizzle-orm";
@@ -67,6 +83,41 @@ export interface IStorage {
   // Analytics
   getSalesData(): Promise<{ month: string; sales: number }[]>;
   getPlatformDistribution(): Promise<{ platform: string; percentage: number }[]>;
+  
+  // Warehouse operations
+  getWarehouses(userId?: string): Promise<Warehouse[]>;
+  getWarehouseById(id: string): Promise<WarehouseWithDetails | undefined>;
+  createWarehouse(warehouse: InsertWarehouse, createdBy: string): Promise<Warehouse>;
+  updateWarehouse(id: string, updates: Partial<InsertWarehouse>): Promise<Warehouse>;
+  deleteWarehouse(id: string): Promise<void>;
+  getUserWarehousePermissions(userId: string): Promise<WarehousePermission[]>;
+  
+  // Product operations
+  getProducts(warehouseId?: string): Promise<Product[]>;
+  getProductById(id: string): Promise<ProductWithInventory | undefined>;
+  createProduct(product: InsertProduct, createdBy: string): Promise<Product>;
+  updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product>;
+  deleteProduct(id: string): Promise<void>;
+  
+  // Inventory operations
+  getInventory(warehouseId?: string): Promise<InventoryWithDetails[]>;
+  updateInventory(warehouseId: string, productId: string, quantity: number): Promise<Inventory>;
+  getInventoryByWarehouse(warehouseId: string): Promise<InventoryWithDetails[]>;
+  getLowStockItems(warehouseId?: string): Promise<InventoryWithDetails[]>;
+  
+  // Warehouse permissions
+  getWarehousePermissions(warehouseId: string): Promise<WarehousePermission[]>;
+  addWarehousePermission(permission: InsertWarehousePermission): Promise<WarehousePermission>;
+  updateWarehousePermission(id: string, permission: 'read' | 'write' | 'admin'): Promise<WarehousePermission>;
+  removeWarehousePermission(id: string): Promise<void>;
+  
+  // Warehouse analytics
+  getWarehouseStats(warehouseId: string): Promise<{
+    totalProducts: number;
+    totalValue: string;
+    lowStockItems: number;
+    totalOrders: number;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -388,6 +439,326 @@ export class DatabaseStorage implements IStorage {
       monthlyExpenses: monthlyExpensesResult.sum || "0",
       pendingApprovals: pendingApprovalsResult.count,
       budgetRemaining: remaining.toString(),
+    };
+  }
+
+  // Warehouse operations
+  async getWarehouses(userId?: string): Promise<Warehouse[]> {
+    let query = db.select().from(warehouses).where(eq(warehouses.isActive, true));
+    
+    if (userId) {
+      // If userId provided, filter by warehouses user has access to
+      query = db.select({
+        id: warehouses.id,
+        name: warehouses.name,
+        description: warehouses.description,
+        location: warehouses.location,
+        isActive: warehouses.isActive,
+        createdBy: warehouses.createdBy,
+        createdAt: warehouses.createdAt,
+        updatedAt: warehouses.updatedAt,
+      })
+      .from(warehouses)
+      .leftJoin(warehousePermissions, eq(warehousePermissions.warehouseId, warehouses.id))
+      .where(
+        and(
+          eq(warehouses.isActive, true),
+          or(
+            eq(warehouses.createdBy, userId),
+            eq(warehousePermissions.userId, userId)
+          )
+        )
+      ) as any;
+    }
+    
+    return await query;
+  }
+
+  async getWarehouseById(id: string): Promise<WarehouseWithDetails | undefined> {
+    const warehouseResult = await db
+      .select()
+      .from(warehouses)
+      .leftJoin(users, eq(warehouses.createdBy, users.id))
+      .where(eq(warehouses.id, id));
+
+    if (warehouseResult.length === 0) return undefined;
+
+    const warehouse = warehouseResult[0].warehouses;
+    const creator = warehouseResult[0].users;
+
+    const inventoryResult = await db
+      .select()
+      .from(inventory)
+      .leftJoin(products, eq(inventory.productId, products.id))
+      .where(eq(inventory.warehouseId, id));
+
+    const permissionsResult = await db
+      .select()
+      .from(warehousePermissions)
+      .leftJoin(users, eq(warehousePermissions.userId, users.id))
+      .where(eq(warehousePermissions.warehouseId, id));
+
+    return {
+      ...warehouse,
+      createdByUser: creator!,
+      inventory: inventoryResult.map(r => ({
+        ...r.inventory!,
+        product: r.products!
+      })),
+      permissions: permissionsResult.map(r => ({
+        ...r.warehouse_permissions!,
+        user: r.users!
+      }))
+    };
+  }
+
+  async createWarehouse(warehouseData: InsertWarehouse, createdBy: string): Promise<Warehouse> {
+    const [warehouse] = await db
+      .insert(warehouses)
+      .values({ ...warehouseData, createdBy })
+      .returning();
+    return warehouse;
+  }
+
+  async updateWarehouse(id: string, updates: Partial<InsertWarehouse>): Promise<Warehouse> {
+    const [warehouse] = await db
+      .update(warehouses)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(warehouses.id, id))
+      .returning();
+    return warehouse;
+  }
+
+  async deleteWarehouse(id: string): Promise<void> {
+    await db
+      .update(warehouses)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(warehouses.id, id));
+  }
+
+  async getUserWarehousePermissions(userId: string): Promise<WarehousePermission[]> {
+    return await db
+      .select()
+      .from(warehousePermissions)
+      .where(eq(warehousePermissions.userId, userId));
+  }
+
+  // Product operations
+  async getProducts(warehouseId?: string): Promise<Product[]> {
+    let query = db.select().from(products).where(eq(products.isActive, true));
+    
+    if (warehouseId) {
+      query = db.select({
+        id: products.id,
+        name: products.name,
+        sku: products.sku,
+        description: products.description,
+        category: products.category,
+        unitPrice: products.unitPrice,
+        isActive: products.isActive,
+        createdBy: products.createdBy,
+        createdAt: products.createdAt,
+        updatedAt: products.updatedAt,
+      })
+      .from(products)
+      .leftJoin(inventory, eq(inventory.productId, products.id))
+      .where(
+        and(
+          eq(products.isActive, true),
+          eq(inventory.warehouseId, warehouseId)
+        )
+      ) as any;
+    }
+    
+    return await query;
+  }
+
+  async getProductById(id: string): Promise<ProductWithInventory | undefined> {
+    const productResult = await db
+      .select()
+      .from(products)
+      .leftJoin(users, eq(products.createdBy, users.id))
+      .where(eq(products.id, id));
+
+    if (productResult.length === 0) return undefined;
+
+    const product = productResult[0].products;
+    const creator = productResult[0].users;
+
+    const inventoryResult = await db
+      .select()
+      .from(inventory)
+      .leftJoin(warehouses, eq(inventory.warehouseId, warehouses.id))
+      .where(eq(inventory.productId, id));
+
+    return {
+      ...product,
+      createdByUser: creator!,
+      inventory: inventoryResult.map(r => ({
+        ...r.inventory!,
+        warehouse: r.warehouses!
+      }))
+    };
+  }
+
+  async createProduct(productData: InsertProduct, createdBy: string): Promise<Product> {
+    const [product] = await db
+      .insert(products)
+      .values({ ...productData, createdBy })
+      .returning();
+    return product;
+  }
+
+  async updateProduct(id: string, updates: Partial<InsertProduct>): Promise<Product> {
+    const [product] = await db
+      .update(products)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(products.id, id))
+      .returning();
+    return product;
+  }
+
+  async deleteProduct(id: string): Promise<void> {
+    await db
+      .update(products)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(products.id, id));
+  }
+
+  // Inventory operations
+  async getInventory(warehouseId?: string): Promise<InventoryWithDetails[]> {
+    let query = db
+      .select()
+      .from(inventory)
+      .leftJoin(warehouses, eq(inventory.warehouseId, warehouses.id))
+      .leftJoin(products, eq(inventory.productId, products.id));
+
+    if (warehouseId) {
+      query = query.where(eq(inventory.warehouseId, warehouseId)) as any;
+    }
+
+    const result = await query;
+    return result.map(r => ({
+      ...r.inventory!,
+      warehouse: r.warehouses!,
+      product: r.products!
+    }));
+  }
+
+  async updateInventory(warehouseId: string, productId: string, quantity: number): Promise<Inventory> {
+    const [inventory] = await db
+      .insert(inventory)
+      .values({ warehouseId, productId, quantity })
+      .onConflictDoUpdate({
+        target: [inventory.warehouseId, inventory.productId],
+        set: { quantity, updatedAt: new Date() }
+      })
+      .returning();
+    return inventory;
+  }
+
+  async getInventoryByWarehouse(warehouseId: string): Promise<InventoryWithDetails[]> {
+    return this.getInventory(warehouseId);
+  }
+
+  async getLowStockItems(warehouseId?: string): Promise<InventoryWithDetails[]> {
+    let query = db
+      .select()
+      .from(inventory)
+      .leftJoin(warehouses, eq(inventory.warehouseId, warehouses.id))
+      .leftJoin(products, eq(inventory.productId, products.id))
+      .where(
+        sql`${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10)`
+      );
+
+    if (warehouseId) {
+      query = query.where(
+        and(
+          sql`${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10)`,
+          eq(inventory.warehouseId, warehouseId)
+        )
+      ) as any;
+    }
+
+    const result = await query;
+    return result.map(r => ({
+      ...r.inventory!,
+      warehouse: r.warehouses!,
+      product: r.products!
+    }));
+  }
+
+  // Warehouse permissions
+  async getWarehousePermissions(warehouseId: string): Promise<WarehousePermission[]> {
+    return await db
+      .select()
+      .from(warehousePermissions)
+      .where(eq(warehousePermissions.warehouseId, warehouseId));
+  }
+
+  async addWarehousePermission(permissionData: InsertWarehousePermission): Promise<WarehousePermission> {
+    const [permission] = await db
+      .insert(warehousePermissions)
+      .values(permissionData)
+      .returning();
+    return permission;
+  }
+
+  async updateWarehousePermission(id: string, permission: 'read' | 'write' | 'admin'): Promise<WarehousePermission> {
+    const [updated] = await db
+      .update(warehousePermissions)
+      .set({ permission })
+      .where(eq(warehousePermissions.id, id))
+      .returning();
+    return updated;
+  }
+
+  async removeWarehousePermission(id: string): Promise<void> {
+    await db
+      .delete(warehousePermissions)
+      .where(eq(warehousePermissions.id, id));
+  }
+
+  // Warehouse analytics
+  async getWarehouseStats(warehouseId: string): Promise<{
+    totalProducts: number;
+    totalValue: string;
+    lowStockItems: number;
+    totalOrders: number;
+  }> {
+    const [productCount] = await db
+      .select({ count: count() })
+      .from(inventory)
+      .where(eq(inventory.warehouseId, warehouseId));
+
+    const [valueResult] = await db
+      .select({ 
+        total: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.unitPrice}, 0)), 0)` 
+      })
+      .from(inventory)
+      .leftJoin(products, eq(inventory.productId, products.id))
+      .where(eq(inventory.warehouseId, warehouseId));
+
+    const [lowStockCount] = await db
+      .select({ count: count() })
+      .from(inventory)
+      .where(
+        and(
+          eq(inventory.warehouseId, warehouseId),
+          sql`${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10)`
+        )
+      );
+
+    const [orderCount] = await db
+      .select({ count: count() })
+      .from(orders)
+      .where(eq(orders.warehouseId, warehouseId));
+
+    return {
+      totalProducts: productCount.count,
+      totalValue: valueResult.total || "0",
+      lowStockItems: lowStockCount.count,
+      totalOrders: orderCount.count,
     };
   }
 

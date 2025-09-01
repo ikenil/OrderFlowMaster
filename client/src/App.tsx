@@ -9,6 +9,7 @@ import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Orders from "@/pages/orders";
 import OrderDetails from "@/pages/order-details";
+import Warehouses from "@/pages/warehouses";
 import Expenses from "@/pages/expenses";
 import Users from "@/pages/users";
 import NotFound from "@/pages/not-found";
@@ -44,6 +45,7 @@ function Router() {
           <Route path="/" component={Dashboard} />
           <Route path="/orders" component={Orders} />
           <Route path="/orders/:id" component={OrderDetails} />
+          <Route path="/warehouses" component={Warehouses} />
           <Route path="/expenses" component={Expenses} />
           <Route path="/users" component={Users} />
           <Route path="/analytics" component={() => <div className="p-6">Analytics coming soon...</div>} />
