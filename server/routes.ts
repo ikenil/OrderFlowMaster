@@ -31,11 +31,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Dashboard stats
   app.get('/api/dashboard/stats', isAuthenticated, async (req, res) => {
     try {
-      const [orderStats, expenseStats, salesData, platformData] = await Promise.all([
+      const [orderStats, expenseStats, salesData, platformData, overallStats] = await Promise.all([
         storage.getOrderStats(),
         storage.getExpenseStats(),
         storage.getSalesData(),
         storage.getPlatformDistribution(),
+        storage.getOverallStats(),
       ]);
 
       res.json({
@@ -43,6 +44,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         expenses: expenseStats,
         salesData,
         platformData,
+        overall: overallStats,
       });
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);

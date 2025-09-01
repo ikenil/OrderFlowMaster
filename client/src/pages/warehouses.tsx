@@ -33,6 +33,12 @@ const productSchema = z.object({
   description: z.string().optional(),
   category: z.enum(['electronics', 'clothing', 'books', 'home', 'beauty', 'sports', 'toys', 'other']).default('other'),
   unitPrice: z.number().min(0).optional(),
+  costPrice: z.number().min(0).optional(),
+  weight: z.number().min(0).optional(),
+  dimensions: z.string().optional(),
+  barcode: z.string().optional(),
+  brand: z.string().optional(),
+  supplier: z.string().optional(),
 });
 
 const inventorySchema = z.object({

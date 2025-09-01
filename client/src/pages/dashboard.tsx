@@ -8,7 +8,8 @@ import SalesChart from "@/components/dashboard/sales-chart";
 import PlatformChart from "@/components/dashboard/platform-chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ShoppingCart, DollarSign, Clock, TrendingDown } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ShoppingCart, DollarSign, Clock, TrendingDown, Warehouse, Package, TrendingUp, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 
 export default function Dashboard() {
@@ -43,6 +44,19 @@ export default function Dashboard() {
     };
     salesData: { month: string; sales: number }[];
     platformData: { platform: string; percentage: number }[];
+    overall: {
+      totalWarehouses: number;
+      totalProducts: number;
+      totalInventoryValue: string;
+      totalProfit: string;
+      profitMargin: string;
+      topPerformingWarehouses: Array<{
+        id: string;
+        name: string;
+        profit: string;
+        profitMargin: string;
+      }>;
+    };
   }>({
     queryKey: ["/api/dashboard/stats"],
     retry: false,
@@ -73,12 +87,45 @@ export default function Dashboard() {
 
   const stats = dashboardData?.orders || {};
   const expenses = dashboardData?.expenses || {};
+  const overall = dashboardData?.overall || {};
 
   return (
     <div className="flex-1 overflow-hidden">
-      <Header title="Dashboard" subtitle="Overview of your order management system" />
+      <Header title="Inventory Management Dashboard" subtitle="Complete overview of warehouses, products, and profit analytics" />
       <div className="flex-1 overflow-auto p-6">
-        {/* KPI Cards */}
+        {/* Primary Inventory KPIs */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <KPICard
+            title="Total Warehouses"
+            value={overall.totalWarehouses || 0}
+            icon={Warehouse}
+            iconColor="bg-blue-500/10 text-blue-500"
+            trend={{ value: "Active", positive: true, label: "warehouses" }}
+          />
+          <KPICard
+            title="Total Products"
+            value={overall.totalProducts || 0}
+            icon={Package}
+            iconColor="bg-purple-500/10 text-purple-500"
+            trend={{ value: "In Stock", positive: true, label: "products" }}
+          />
+          <KPICard
+            title="Inventory Value"
+            value={`₹${parseFloat(overall.totalInventoryValue || "0").toLocaleString()}`}
+            icon={DollarSign}
+            iconColor="bg-green-500/10 text-green-500"
+            trend={{ value: overall.profitMargin || "0%", positive: true, label: "profit margin" }}
+          />
+          <KPICard
+            title="Total Profit"
+            value={`₹${parseFloat(overall.totalProfit || "0").toLocaleString()}`}
+            icon={TrendingUp}
+            iconColor="bg-emerald-500/10 text-emerald-500"
+            trend={{ value: overall.profitMargin || "0%", positive: true, label: "margin" }}
+          />
+        </div>
+
+        {/* Order Management KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <KPICard
             title="Total Orders"
@@ -110,10 +157,42 @@ export default function Dashboard() {
           />
         </div>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Analytics Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           <SalesChart data={dashboardData?.salesData || []} />
           <PlatformChart data={dashboardData?.platformData || []} />
+          
+          {/* Top Performing Warehouses */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-green-500" />
+                Top Warehouses
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {overall.topPerformingWarehouses?.slice(0, 5).map((warehouse: any, index: number) => (
+                  <div key={warehouse.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-sm font-medium">
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">{warehouse.name}</p>
+                        <p className="text-xs text-muted-foreground">Profit: ₹{parseFloat(warehouse.profit).toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <Badge variant="secondary" className="text-xs">
+                      {warehouse.profitMargin}
+                    </Badge>
+                  </div>
+                )) || (
+                  <p className="text-sm text-muted-foreground text-center py-4">No warehouse data available</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Recent Orders */}

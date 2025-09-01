@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/useAuth";
 import Sidebar from "@/components/layout/sidebar";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
+import Products from "@/pages/products";
 import Orders from "@/pages/orders";
 import OrderDetails from "@/pages/order-details";
 import Warehouses from "@/pages/warehouses";
@@ -43,6 +44,7 @@ function Router() {
       <main className="flex-1 overflow-hidden">
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/products" component={Products} />
           <Route path="/orders" component={Orders} />
           <Route path="/orders/:id" component={OrderDetails} />
           <Route path="/warehouses" component={Warehouses} />

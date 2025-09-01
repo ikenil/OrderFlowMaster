@@ -115,8 +115,28 @@ export interface IStorage {
   getWarehouseStats(warehouseId: string): Promise<{
     totalProducts: number;
     totalValue: string;
+    totalCost: string;
+    totalProfit: string;
     lowStockItems: number;
     totalOrders: number;
+    monthlyRevenue: string;
+    monthlyProfit: string;
+    profitMargin: string;
+  }>;
+  
+  // Overall analytics
+  getOverallStats(): Promise<{
+    totalWarehouses: number;
+    totalProducts: number;
+    totalInventoryValue: string;
+    totalProfit: string;
+    profitMargin: string;
+    topPerformingWarehouses: Array<{
+      id: string;
+      name: string;
+      profit: string;
+      profitMargin: string;
+    }>;
   }>;
 }
 
@@ -646,7 +666,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateInventory(warehouseId: string, productId: string, quantity: number): Promise<Inventory> {
-    const [inventory] = await db
+    const [inventoryRecord] = await db
       .insert(inventory)
       .values({ warehouseId, productId, quantity })
       .onConflictDoUpdate({
@@ -654,7 +674,7 @@ export class DatabaseStorage implements IStorage {
         set: { quantity, updatedAt: new Date() }
       })
       .returning();
-    return inventory;
+    return inventoryRecord;
   }
 
   async getInventoryByWarehouse(warehouseId: string): Promise<InventoryWithDetails[]> {
@@ -662,25 +682,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getLowStockItems(warehouseId?: string): Promise<InventoryWithDetails[]> {
-    let query = db
+    const baseConditions = [
+      sql`${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10)`
+    ];
+
+    if (warehouseId) {
+      baseConditions.push(eq(inventory.warehouseId, warehouseId));
+    }
+
+    const result = await db
       .select()
       .from(inventory)
       .leftJoin(warehouses, eq(inventory.warehouseId, warehouses.id))
       .leftJoin(products, eq(inventory.productId, products.id))
-      .where(
-        sql`${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10)`
-      );
+      .where(and(...baseConditions));
 
-    if (warehouseId) {
-      query = query.where(
-        and(
-          sql`${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10)`,
-          eq(inventory.warehouseId, warehouseId)
-        )
-      ) as any;
-    }
-
-    const result = await query;
     return result.map(r => ({
       ...r.inventory!,
       warehouse: r.warehouses!,
@@ -723,8 +739,13 @@ export class DatabaseStorage implements IStorage {
   async getWarehouseStats(warehouseId: string): Promise<{
     totalProducts: number;
     totalValue: string;
+    totalCost: string;
+    totalProfit: string;
     lowStockItems: number;
     totalOrders: number;
+    monthlyRevenue: string;
+    monthlyProfit: string;
+    profitMargin: string;
   }> {
     const [productCount] = await db
       .select({ count: count() })
@@ -733,7 +754,8 @@ export class DatabaseStorage implements IStorage {
 
     const [valueResult] = await db
       .select({ 
-        total: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.unitPrice}, 0)), 0)` 
+        totalValue: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.unitPrice}, 0)), 0)`,
+        totalCost: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.costPrice}, 0)), 0)`
       })
       .from(inventory)
       .leftJoin(products, eq(inventory.productId, products.id))
@@ -754,11 +776,103 @@ export class DatabaseStorage implements IStorage {
       .from(orders)
       .where(eq(orders.warehouseId, warehouseId));
 
+    // Monthly revenue and profit (last 30 days)
+    const [monthlyStats] = await db
+      .select({
+        revenue: sql<string>`COALESCE(SUM(${orders.totalAmount}), 0)`,
+        profit: sql<string>`COALESCE(SUM(${orders.profit}), 0)`
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.warehouseId, warehouseId),
+          gte(orders.createdAt, sql`NOW() - INTERVAL '30 days'`)
+        )
+      );
+
+    const totalValue = parseFloat(valueResult.totalValue || "0");
+    const totalCost = parseFloat(valueResult.totalCost || "0");
+    const totalProfit = totalValue - totalCost;
+    const profitMargin = totalValue > 0 ? ((totalProfit / totalValue) * 100).toFixed(2) : "0";
+
     return {
       totalProducts: productCount.count,
-      totalValue: valueResult.total || "0",
+      totalValue: valueResult.totalValue || "0",
+      totalCost: valueResult.totalCost || "0",
+      totalProfit: totalProfit.toFixed(2),
       lowStockItems: lowStockCount.count,
       totalOrders: orderCount.count,
+      monthlyRevenue: monthlyStats.revenue || "0",
+      monthlyProfit: monthlyStats.profit || "0",
+      profitMargin: profitMargin + "%",
+    };
+  }
+
+  // Overall analytics
+  async getOverallStats(): Promise<{
+    totalWarehouses: number;
+    totalProducts: number;
+    totalInventoryValue: string;
+    totalProfit: string;
+    profitMargin: string;
+    topPerformingWarehouses: Array<{
+      id: string;
+      name: string;
+      profit: string;
+      profitMargin: string;
+    }>;
+  }> {
+    const [warehouseCount] = await db
+      .select({ count: count() })
+      .from(warehouses)
+      .where(eq(warehouses.isActive, true));
+
+    const [productCount] = await db
+      .select({ count: count() })
+      .from(products)
+      .where(eq(products.isActive, true));
+
+    const [inventoryStats] = await db
+      .select({
+        totalValue: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.unitPrice}, 0)), 0)`,
+        totalCost: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.costPrice}, 0)), 0)`
+      })
+      .from(inventory)
+      .leftJoin(products, eq(inventory.productId, products.id));
+
+    const topWarehouses = await db
+      .select({
+        id: warehouses.id,
+        name: warehouses.name,
+        profit: sql<string>`COALESCE(SUM(${orders.profit}), 0)`,
+        revenue: sql<string>`COALESCE(SUM(${orders.totalAmount}), 0)`
+      })
+      .from(warehouses)
+      .leftJoin(orders, eq(warehouses.id, orders.warehouseId))
+      .where(eq(warehouses.isActive, true))
+      .groupBy(warehouses.id, warehouses.name)
+      .orderBy(sql`COALESCE(SUM(${orders.profit}), 0) DESC`)
+      .limit(5);
+
+    const totalValue = parseFloat(inventoryStats.totalValue || "0");
+    const totalCost = parseFloat(inventoryStats.totalCost || "0");
+    const totalProfit = totalValue - totalCost;
+    const profitMargin = totalValue > 0 ? ((totalProfit / totalValue) * 100).toFixed(2) : "0";
+
+    return {
+      totalWarehouses: warehouseCount.count,
+      totalProducts: productCount.count,
+      totalInventoryValue: inventoryStats.totalValue || "0",
+      totalProfit: totalProfit.toFixed(2),
+      profitMargin: profitMargin + "%",
+      topPerformingWarehouses: topWarehouses.map(w => ({
+        id: w.id,
+        name: w.name,
+        profit: w.profit || "0",
+        profitMargin: parseFloat(w.revenue || "0") > 0 
+          ? (((parseFloat(w.profit || "0") / parseFloat(w.revenue || "0")) * 100).toFixed(2) + "%")
+          : "0%"
+      }))
     };
   }
 
