@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(210, 20%, 98%);
+  --foreground: hsl(210, 20%, 10%);
+  --card: hsl(0, 0%, 100%);
+  --card-foreground: hsl(210, 20%, 15%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(210, 20%, 15%);
+  --primary: hsl(213, 84%, 56%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(210, 14%, 89%);
+  --secondary-foreground: hsl(210, 20%, 25%);
+  --muted: hsl(210, 14%, 89%);
+  --muted-foreground: hsl(210, 20%, 40%);
+  --accent: hsl(213, 84%, 56%);
+  --accent-foreground: hsl(0, 0%, 100%);
+  --destructive: hsl(0, 84%, 60%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(210, 20%, 89%);
+  --input: hsl(210, 20%, 89%);
+  --ring: hsl(213, 84%, 56%);
+  --chart-1: hsl(213, 84%, 56%);
+  --chart-2: hsl(142, 84%, 40%);
+  --chart-3: hsl(45, 84%, 60%);
+  --chart-4: hsl(270, 84%, 60%);
+  --chart-5: hsl(0, 84%, 60%);
+  --sidebar: hsl(0, 0%, 100%);
+  --sidebar-foreground: hsl(210, 20%, 15%);
+  --sidebar-primary: hsl(213, 84%, 56%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(213, 84%, 56%);
+  --sidebar-accent-foreground: hsl(0, 0%, 100%);
+  --sidebar-border: hsl(210, 20%, 89%);
+  --sidebar-ring: hsl(213, 84%, 56%);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: Menlo, monospace;
+  --radius: 8px;
+  --shadow-2xs: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00);
+  --shadow-xs: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00);
+  --shadow-sm: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 1px 2px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 1px 2px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-md: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 2px 4px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-lg: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 4px 6px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-xl: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 8px 10px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-2xl: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+}
+
+.dark {
+  --background: hsl(210, 20%, 6%);
+  --foreground: hsl(210, 20%, 90%);
+  --card: hsl(210, 20%, 9%);
+  --card-foreground: hsl(210, 20%, 85%);
+  --popover: hsl(210, 20%, 9%);
+  --popover-foreground: hsl(210, 20%, 85%);
+  --primary: hsl(213, 84%, 56%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(210, 20%, 14%);
+  --secondary-foreground: hsl(210, 20%, 75%);
+  --muted: hsl(210, 20%, 14%);
+  --muted-foreground: hsl(210, 20%, 60%);
+  --accent: hsl(213, 84%, 56%);
+  --accent-foreground: hsl(0, 0%, 100%);
+  --destructive: hsl(0, 84%, 60%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(210, 20%, 14%);
+  --input: hsl(210, 20%, 14%);
+  --ring: hsl(213, 84%, 56%);
+  --chart-1: hsl(213, 84%, 56%);
+  --chart-2: hsl(142, 84%, 40%);
+  --chart-3: hsl(45, 84%, 60%);
+  --chart-4: hsl(270, 84%, 60%);
+  --chart-5: hsl(0, 84%, 60%);
+  --sidebar: hsl(210, 20%, 9%);
+  --sidebar-foreground: hsl(210, 20%, 85%);
+  --sidebar-primary: hsl(213, 84%, 56%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(213, 84%, 56%);
+  --sidebar-accent-foreground: hsl(0, 0%, 100%);
+  --sidebar-border: hsl(210, 20%, 14%);
+  --sidebar-ring: hsl(213, 84%, 56%);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: Menlo, monospace;
+  --radius: 8px;
+  --shadow-2xs: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00);
+  --shadow-xs: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00);
+  --shadow-sm: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 1px 2px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 1px 2px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-md: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 2px 4px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-lg: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 4px 6px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-xl: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00), 0px 8px 10px -1px hsl(213, 84%, 56% / 0.00);
+  --shadow-2xl: 0px 2px 0px 0px hsl(213, 84%, 56% / 0.00);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
