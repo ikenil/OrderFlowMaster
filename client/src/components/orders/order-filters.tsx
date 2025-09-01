@@ -39,7 +39,7 @@ export default function OrderFilters({
               <SelectValue placeholder="All Platforms" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Platforms</SelectItem>
+              <SelectItem value="all">All Platforms</SelectItem>
               <SelectItem value="amazon">Amazon</SelectItem>
               <SelectItem value="flipkart">Flipkart</SelectItem>
               <SelectItem value="meesho">Meesho</SelectItem>
@@ -55,7 +55,7 @@ export default function OrderFilters({
               <SelectValue placeholder="All Status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Status</SelectItem>
+              <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
               <SelectItem value="processing">Processing</SelectItem>
               <SelectItem value="shipped">Shipped</SelectItem>

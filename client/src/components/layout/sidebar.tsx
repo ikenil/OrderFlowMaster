@@ -52,16 +52,18 @@ export default function Sidebar() {
             
             return (
               <li key={item.name}>
-                <Link href={item.href}>
-                  <a className={cn(
+                <Link 
+                  href={item.href}
+                  className={cn(
                     "flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors",
                     isActive
                       ? "bg-accent text-accent-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )} data-testid={`nav-${item.name.toLowerCase().replace(' ', '-')}`}>
-                    <Icon className="w-5 h-5 mr-3" />
-                    {item.name}
-                  </a>
+                  )} 
+                  data-testid={`nav-${item.name.toLowerCase().replace(' ', '-')}`}
+                >
+                  <Icon className="w-5 h-5 mr-3" />
+                  {item.name}
                 </Link>
               </li>
             );
