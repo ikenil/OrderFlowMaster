@@ -8,7 +8,9 @@ import {
   insertWarehouseSchema,
   insertProductSchema,
   insertInventorySchema,
-  insertWarehousePermissionSchema
+  insertWarehousePermissionSchema,
+  insertStockMovementSchema,
+  insertWarehouseTransferSchema
 } from "@shared/schema";
 import { z } from "zod";
 
@@ -86,10 +88,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/orders', isAuthenticated, async (req, res) => {
+  app.post('/api/orders', isAuthenticated, async (req: any, res) => {
     try {
       const orderData = insertOrderSchema.parse(req.body);
       const order = await storage.createOrder(orderData);
+      
+      // If order has warehouse and product info, create outbound stock movement
+      if (order.warehouseId && order.productId && order.quantity) {
+        await storage.adjustInventoryWithMovement(
+          order.warehouseId,
+          order.productId,
+          -order.quantity,
+          'sale',
+          req.user.claims.sub,
+          `Order fulfillment: ${order.platformOrderId}`
+        );
+      }
+      
       res.status(201).json(order);
     } catch (error) {
       console.error("Error creating order:", error);
@@ -97,10 +112,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/orders/:id/status', isAuthenticated, async (req, res) => {
+  app.patch('/api/orders/:id/status', isAuthenticated, async (req: any, res) => {
     try {
       const { status, notes } = req.body;
       const order = await storage.updateOrderStatus(req.params.id, status, notes);
+      
+      // Handle inventory adjustments for status changes
+      if (order && order.warehouseId && order.productId && order.quantity) {
+        // If order is cancelled or returned, add inventory back
+        if (status === 'cancelled' || status === 'returned') {
+          await storage.adjustInventoryWithMovement(
+            order.warehouseId,
+            order.productId,
+            order.quantity,
+            status === 'cancelled' ? 'cancellation' : 'return',
+            req.user.claims.sub,
+            `Order ${status}: ${order.platformOrderId}`
+          );
+        }
+      }
+      
       res.json(order);
     } catch (error) {
       console.error("Error updating order status:", error);
@@ -433,6 +464,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching warehouse stats:", error);
       res.status(500).json({ message: "Failed to fetch warehouse stats" });
+    }
+  });
+
+  // Warehouse reports
+  app.get('/api/warehouses/:id/report', isAuthenticated, async (req, res) => {
+    try {
+      const { dateFrom, dateTo } = req.query;
+      const report = await storage.getWarehouseReport(
+        req.params.id,
+        dateFrom as string,
+        dateTo as string
+      );
+      res.json(report);
+    } catch (error) {
+      console.error("Error fetching warehouse report:", error);
+      res.status(500).json({ message: "Failed to fetch warehouse report" });
+    }
+  });
+
+  // Stock movements routes
+  app.get('/api/stock-movements', isAuthenticated, async (req, res) => {
+    try {
+      const { warehouseId, productId } = req.query;
+      const movements = await storage.getStockMovements(
+        warehouseId as string,
+        productId as string
+      );
+      res.json(movements);
+    } catch (error) {
+      console.error("Error fetching stock movements:", error);
+      res.status(500).json({ message: "Failed to fetch stock movements" });
+    }
+  });
+
+  app.post('/api/stock-movements', isAuthenticated, async (req: any, res) => {
+    try {
+      const movementData = insertStockMovementSchema.parse({
+        ...req.body,
+        createdBy: req.user.claims.sub
+      });
+      const movement = await storage.createStockMovement(movementData);
+      res.status(201).json(movement);
+    } catch (error) {
+      console.error("Error creating stock movement:", error);
+      res.status(400).json({ message: "Invalid stock movement data" });
+    }
+  });
+
+  app.get('/api/products/:id/stock-movements', isAuthenticated, async (req, res) => {
+    try {
+      const movements = await storage.getStockMovementsByProduct(req.params.id);
+      res.json(movements);
+    } catch (error) {
+      console.error("Error fetching product stock movements:", error);
+      res.status(500).json({ message: "Failed to fetch product stock movements" });
+    }
+  });
+
+  // Warehouse transfers routes
+  app.get('/api/warehouse-transfers', isAuthenticated, async (req, res) => {
+    try {
+      const { warehouseId } = req.query;
+      const transfers = await storage.getWarehouseTransfers(warehouseId as string);
+      res.json(transfers);
+    } catch (error) {
+      console.error("Error fetching warehouse transfers:", error);
+      res.status(500).json({ message: "Failed to fetch warehouse transfers" });
+    }
+  });
+
+  app.post('/api/warehouse-transfers', isAuthenticated, async (req: any, res) => {
+    try {
+      const transferData = insertWarehouseTransferSchema.parse({
+        ...req.body,
+        requestedBy: req.user.claims.sub
+      });
+      const transfer = await storage.createWarehouseTransfer(transferData);
+      res.status(201).json(transfer);
+    } catch (error) {
+      console.error("Error creating warehouse transfer:", error);
+      res.status(400).json({ message: "Invalid warehouse transfer data" });
+    }
+  });
+
+  app.patch('/api/warehouse-transfers/:id/status', isAuthenticated, async (req: any, res) => {
+    try {
+      const { status } = req.body;
+      const transfer = await storage.updateTransferStatus(
+        req.params.id,
+        status,
+        req.user.claims.sub
+      );
+      res.json(transfer);
+    } catch (error) {
+      console.error("Error updating transfer status:", error);
+      res.status(500).json({ message: "Failed to update transfer status" });
+    }
+  });
+
+  app.patch('/api/warehouse-transfers/:id/approve', isAuthenticated, async (req: any, res) => {
+    try {
+      const transfer = await storage.approveTransfer(
+        req.params.id,
+        req.user.claims.sub
+      );
+      res.json(transfer);
+    } catch (error) {
+      console.error("Error approving transfer:", error);
+      res.status(500).json({ message: "Failed to approve transfer" });
+    }
+  });
+
+  app.post('/api/warehouse-transfers/:id/process', isAuthenticated, async (req: any, res) => {
+    try {
+      const transfer = await storage.processTransfer(
+        req.params.id,
+        req.user.claims.sub
+      );
+      res.json(transfer);
+    } catch (error) {
+      console.error("Error processing transfer:", error);
+      res.status(500).json({ message: "Failed to process transfer" });
+    }
+  });
+
+  // Enhanced inventory operations
+  app.post('/api/inventory/adjust', isAuthenticated, async (req: any, res) => {
+    try {
+      const { warehouseId, productId, quantity, reason, notes } = req.body;
+      const result = await storage.adjustInventoryWithMovement(
+        warehouseId,
+        productId,
+        quantity,
+        reason,
+        req.user.claims.sub,
+        notes
+      );
+      res.json(result);
+    } catch (error) {
+      console.error("Error adjusting inventory:", error);
+      res.status(500).json({ message: "Failed to adjust inventory" });
+    }
+  });
+
+  app.post('/api/inventory/transfer', isAuthenticated, async (req: any, res) => {
+    try {
+      const { fromWarehouseId, toWarehouseId, productId, quantity, notes } = req.body;
+      const transfer = await storage.transferInventoryBetweenWarehouses(
+        fromWarehouseId,
+        toWarehouseId,
+        productId,
+        quantity,
+        req.user.claims.sub,
+        notes
+      );
+      res.json(transfer);
+    } catch (error) {
+      console.error("Error transferring inventory:", error);
+      res.status(500).json({ message: "Failed to transfer inventory" });
     }
   });
 

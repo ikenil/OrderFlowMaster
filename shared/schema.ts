@@ -48,6 +48,38 @@ export const expenseCategoryEnum = pgEnum('expense_category', ['marketing', 'shi
 export const warehousePermissionEnum = pgEnum('warehouse_permission', ['read', 'write', 'admin']);
 export const productCategoryEnum = pgEnum('product_category', ['electronics', 'clothing', 'books', 'home', 'beauty', 'sports', 'toys', 'other']);
 
+// Warehouses table
+export const warehouses = pgTable("warehouses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  description: text("description"),
+  location: varchar("location"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Products table
+export const products = pgTable("products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name").notNull(),
+  sku: varchar("sku").notNull().unique(),
+  description: text("description"),
+  category: productCategoryEnum("category").notNull().default('other'),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }),
+  costPrice: decimal("cost_price", { precision: 10, scale: 2 }),
+  weight: decimal("weight", { precision: 8, scale: 3 }),
+  dimensions: varchar("dimensions"), // e.g., "10x5x3 cm"
+  barcode: varchar("barcode"),
+  brand: varchar("brand"),
+  supplier: varchar("supplier"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: varchar("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Orders table
 export const orders = pgTable("orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -103,38 +135,6 @@ export const orderStatusHistory = pgTable("order_status_history", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// Warehouses table
-export const warehouses = pgTable("warehouses", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: varchar("name").notNull(),
-  description: text("description"),
-  location: varchar("location"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdBy: varchar("created_by").notNull().references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
-// Products table
-export const products = pgTable("products", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: varchar("name").notNull(),
-  sku: varchar("sku").notNull().unique(),
-  description: text("description"),
-  category: productCategoryEnum("category").notNull().default('other'),
-  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }),
-  costPrice: decimal("cost_price", { precision: 10, scale: 2 }),
-  weight: decimal("weight", { precision: 8, scale: 3 }),
-  dimensions: varchar("dimensions"), // e.g., "10x5x3 cm"
-  barcode: varchar("barcode"),
-  brand: varchar("brand"),
-  supplier: varchar("supplier"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdBy: varchar("created_by").notNull().references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
-
 // Inventory table - tracks product quantities per warehouse
 export const inventory = pgTable("inventory", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -154,6 +154,40 @@ export const warehousePermissions = pgTable("warehouse_permissions", {
   warehouseId: varchar("warehouse_id").notNull().references(() => warehouses.id, { onDelete: 'cascade' }),
   permission: warehousePermissionEnum("permission").notNull().default('read'),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Stock movements table - tracks all inventory changes
+export const stockMovements = pgTable("stock_movements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  warehouseId: varchar("warehouse_id").notNull().references(() => warehouses.id, { onDelete: 'cascade' }),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: 'cascade' }),
+  movementType: varchar("movement_type").notNull(), // 'inbound', 'outbound', 'adjustment', 'transfer_in', 'transfer_out'
+  quantity: integer("quantity").notNull(),
+  previousQuantity: integer("previous_quantity").notNull(),
+  newQuantity: integer("new_quantity").notNull(),
+  reason: varchar("reason"), // 'purchase', 'sale', 'return', 'damage', 'count_adjustment', 'transfer'
+  orderId: varchar("order_id").references(() => orders.id), // link to order if related to sale
+  transferId: varchar("transfer_id"), // link transfers together
+  notes: text("notes"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Warehouse transfers table - tracks transfers between warehouses  
+export const warehouseTransfers = pgTable("warehouse_transfers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fromWarehouseId: varchar("from_warehouse_id").notNull().references(() => warehouses.id),
+  toWarehouseId: varchar("to_warehouse_id").notNull().references(() => warehouses.id),
+  productId: varchar("product_id").notNull().references(() => products.id),
+  quantity: integer("quantity").notNull(),
+  status: varchar("status").notNull().default('pending'), // 'pending', 'in_transit', 'completed', 'cancelled'
+  requestedBy: varchar("requested_by").notNull().references(() => users.id),
+  approvedBy: varchar("approved_by").references(() => users.id),
+  shippedAt: timestamp("shipped_at"),
+  receivedAt: timestamp("received_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // Relations
@@ -238,6 +272,52 @@ export const orderStatusHistoryRelations = relations(orderStatusHistory, ({ one 
   }),
 }));
 
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  warehouse: one(warehouses, {
+    fields: [stockMovements.warehouseId],
+    references: [warehouses.id],
+  }),
+  product: one(products, {
+    fields: [stockMovements.productId],
+    references: [products.id],
+  }),
+  order: one(orders, {
+    fields: [stockMovements.orderId],
+    references: [orders.id],
+  }),
+  createdByUser: one(users, {
+    fields: [stockMovements.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const warehouseTransfersRelations = relations(warehouseTransfers, ({ one }) => ({
+  fromWarehouse: one(warehouses, {
+    fields: [warehouseTransfers.fromWarehouseId],
+    references: [warehouses.id],
+    relationName: 'fromWarehouse',
+  }),
+  toWarehouse: one(warehouses, {
+    fields: [warehouseTransfers.toWarehouseId],  
+    references: [warehouses.id],
+    relationName: 'toWarehouse',
+  }),
+  product: one(products, {
+    fields: [warehouseTransfers.productId],
+    references: [products.id],
+  }),
+  requestedByUser: one(users, {
+    fields: [warehouseTransfers.requestedBy],
+    references: [users.id],
+    relationName: 'requestedBy',
+  }),
+  approvedByUser: one(users, {
+    fields: [warehouseTransfers.approvedBy],
+    references: [users.id],
+    relationName: 'approvedBy',
+  }),
+}));
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -294,6 +374,17 @@ export const insertWarehousePermissionSchema = createInsertSchema(warehousePermi
   createdAt: true,
 });
 
+export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertWarehouseTransferSchema = createInsertSchema(warehouseTransfers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type UpsertUser = z.infer<typeof upsertUserSchema>;
@@ -312,6 +403,12 @@ export type InsertInventory = z.infer<typeof insertInventorySchema>;
 export type Inventory = typeof inventory.$inferSelect;
 export type InsertWarehousePermission = z.infer<typeof insertWarehousePermissionSchema>;
 export type WarehousePermission = typeof warehousePermissions.$inferSelect;
+
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
+export type StockMovement = typeof stockMovements.$inferSelect;
+
+export type InsertWarehouseTransfer = z.infer<typeof insertWarehouseTransferSchema>;
+export type WarehouseTransfer = typeof warehouseTransfers.$inferSelect;
 
 // Extended types with relations
 export type OrderWithHistory = Order & {
@@ -343,4 +440,18 @@ export type OrderWithWarehouse = Order & {
   statusHistory: OrderStatusHistory[];
   warehouse?: Warehouse;
   product?: Product;
+};
+
+export type StockMovementWithDetails = StockMovement & {
+  warehouse: Warehouse;
+  product: Product;
+  createdByUser?: User;
+};
+
+export type WarehouseTransferWithDetails = WarehouseTransfer & {
+  fromWarehouse: Warehouse;
+  toWarehouse: Warehouse;
+  product: Product;
+  requestedByUser: User;
+  approvedByUser?: User;
 };

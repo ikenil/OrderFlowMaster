@@ -7,6 +7,8 @@ import {
   products,
   inventory,
   warehousePermissions,
+  stockMovements,
+  warehouseTransfers,
   type User,
   type UpsertUser,
   type InsertUser,
@@ -29,6 +31,12 @@ import {
   type InsertWarehousePermission,
   type WarehouseWithDetails,
   type ProductWithInventory,
+  type StockMovement,
+  type InsertStockMovement,
+  type StockMovementWithDetails,
+  type WarehouseTransfer,
+  type InsertWarehouseTransfer,
+  type WarehouseTransferWithDetails,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, gte, lte, count, sql } from "drizzle-orm";
@@ -125,6 +133,37 @@ export interface IStorage {
     profitMargin: string;
   }>;
   
+  // Stock movements
+  getStockMovements(warehouseId?: string, productId?: string): Promise<StockMovementWithDetails[]>;
+  createStockMovement(movement: InsertStockMovement): Promise<StockMovement>;
+  getStockMovementsByProduct(productId: string): Promise<StockMovementWithDetails[]>;
+  
+  // Warehouse transfers
+  getWarehouseTransfers(warehouseId?: string): Promise<WarehouseTransferWithDetails[]>;
+  createWarehouseTransfer(transfer: InsertWarehouseTransfer): Promise<WarehouseTransfer>;
+  updateTransferStatus(id: string, status: string, userId: string): Promise<WarehouseTransfer>;
+  approveTransfer(id: string, userId: string): Promise<WarehouseTransfer>;
+  processTransfer(id: string, userId: string): Promise<WarehouseTransfer>;
+  
+  // Enhanced inventory operations with stock tracking
+  adjustInventoryWithMovement(
+    warehouseId: string, 
+    productId: string, 
+    quantity: number, 
+    reason: string, 
+    userId: string, 
+    notes?: string
+  ): Promise<{ inventory: Inventory; movement: StockMovement }>;
+  
+  transferInventoryBetweenWarehouses(
+    fromWarehouseId: string,
+    toWarehouseId: string,
+    productId: string,
+    quantity: number,
+    userId: string,
+    notes?: string
+  ): Promise<WarehouseTransfer>;
+
   // Overall analytics
   getOverallStats(): Promise<{
     totalWarehouses: number;
@@ -138,6 +177,25 @@ export interface IStorage {
       profit: string;
       profitMargin: string;
     }>;
+  }>;
+  
+  // Warehouse reports
+  getWarehouseReport(warehouseId: string, dateFrom?: string, dateTo?: string): Promise<{
+    basicInfo: Warehouse;
+    inventoryStats: {
+      totalProducts: number;
+      totalValue: string;
+      lowStockItems: number;
+      outOfStockItems: number;
+    };
+    movementStats: {
+      totalInbound: number;
+      totalOutbound: number;
+      totalTransfersIn: number;
+      totalTransfersOut: number;
+    };
+    recentMovements: StockMovementWithDetails[];
+    pendingTransfers: WarehouseTransferWithDetails[];
   }>;
 }
 
@@ -903,6 +961,387 @@ export class DatabaseStorage implements IStorage {
       { platform: 'Meesho', percentage: 15 },
       { platform: 'Website', percentage: 10 },
     ];
+  }
+
+  // Stock movements operations
+  async getStockMovements(warehouseId?: string, productId?: string): Promise<StockMovementWithDetails[]> {
+    const conditions = [];
+    if (warehouseId) conditions.push(eq(stockMovements.warehouseId, warehouseId));
+    if (productId) conditions.push(eq(stockMovements.productId, productId));
+
+    const result = await db
+      .select()
+      .from(stockMovements)
+      .leftJoin(warehouses, eq(stockMovements.warehouseId, warehouses.id))
+      .leftJoin(products, eq(stockMovements.productId, products.id))
+      .leftJoin(users, eq(stockMovements.createdBy, users.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(stockMovements.createdAt));
+
+    return result.map(r => ({
+      ...r.stock_movements!,
+      warehouse: r.warehouses!,
+      product: r.products!,
+      createdByUser: r.users!
+    }));
+  }
+
+  async createStockMovement(movement: InsertStockMovement): Promise<StockMovement> {
+    const [created] = await db.insert(stockMovements).values(movement).returning();
+    return created;
+  }
+
+  async getStockMovementsByProduct(productId: string): Promise<StockMovementWithDetails[]> {
+    return this.getStockMovements(undefined, productId);
+  }
+
+  // Warehouse transfers operations
+  async getWarehouseTransfers(warehouseId?: string): Promise<WarehouseTransferWithDetails[]> {
+    const conditions = [];
+    if (warehouseId) {
+      conditions.push(
+        or(
+          eq(warehouseTransfers.fromWarehouseId, warehouseId),
+          eq(warehouseTransfers.toWarehouseId, warehouseId)
+        )
+      );
+    }
+
+    const result = await db
+      .select({
+        transfer: warehouseTransfers,
+        fromWarehouse: { id: warehouses.id, name: warehouses.name, location: warehouses.location },
+        toWarehouse: { id: warehouses.id, name: warehouses.name, location: warehouses.location },
+        product: products,
+        requestedByUser: { id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email },
+        approvedByUser: { id: users.id, firstName: users.firstName, lastName: users.lastName, email: users.email },
+      })
+      .from(warehouseTransfers)
+      .leftJoin(warehouses, eq(warehouseTransfers.fromWarehouseId, warehouses.id))
+      .leftJoin(products, eq(warehouseTransfers.productId, products.id))
+      .leftJoin(users, eq(warehouseTransfers.requestedBy, users.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(warehouseTransfers.createdAt));
+
+    // Need to get toWarehouse and approvedByUser separately due to Drizzle join limitations
+    const transfers = [];
+    for (const r of result) {
+      const [toWarehouse] = await db
+        .select()
+        .from(warehouses)
+        .where(eq(warehouses.id, r.transfer.toWarehouseId));
+
+      let approvedByUser = undefined;
+      if (r.transfer.approvedBy) {
+        [approvedByUser] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, r.transfer.approvedBy));
+      }
+
+      transfers.push({
+        ...r.transfer,
+        fromWarehouse: r.fromWarehouse as any,
+        toWarehouse: toWarehouse,
+        product: r.product!,
+        requestedByUser: r.requestedByUser as any,
+        approvedByUser: approvedByUser || undefined
+      });
+    }
+
+    return transfers;
+  }
+
+  async createWarehouseTransfer(transfer: InsertWarehouseTransfer): Promise<WarehouseTransfer> {
+    const [created] = await db.insert(warehouseTransfers).values(transfer).returning();
+    return created;
+  }
+
+  async updateTransferStatus(id: string, status: string, userId: string): Promise<WarehouseTransfer> {
+    const updateData: any = { status, updatedAt: new Date() };
+    
+    if (status === 'in_transit') {
+      updateData.shippedAt = new Date();
+    } else if (status === 'completed') {
+      updateData.receivedAt = new Date();
+    }
+
+    const [updated] = await db
+      .update(warehouseTransfers)
+      .set(updateData)
+      .where(eq(warehouseTransfers.id, id))
+      .returning();
+
+    return updated;
+  }
+
+  async approveTransfer(id: string, userId: string): Promise<WarehouseTransfer> {
+    const [updated] = await db
+      .update(warehouseTransfers)
+      .set({ 
+        approvedBy: userId,
+        updatedAt: new Date()
+      })
+      .where(eq(warehouseTransfers.id, id))
+      .returning();
+
+    return updated;
+  }
+
+  async processTransfer(id: string, userId: string): Promise<WarehouseTransfer> {
+    const [transfer] = await db
+      .select()
+      .from(warehouseTransfers)
+      .where(eq(warehouseTransfers.id, id));
+
+    if (!transfer) throw new Error("Transfer not found");
+
+    // Update transfer status to completed
+    const [updatedTransfer] = await db
+      .update(warehouseTransfers)
+      .set({ 
+        status: 'completed',
+        receivedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(warehouseTransfers.id, id))
+      .returning();
+
+    // Create stock movements for both warehouses
+    const transferId = transfer.id;
+
+    // Outbound from source warehouse
+    await this.createStockMovement({
+      warehouseId: transfer.fromWarehouseId,
+      productId: transfer.productId,
+      movementType: 'transfer_out',
+      quantity: -transfer.quantity,
+      previousQuantity: 0, // Will be updated by inventory adjustment
+      newQuantity: 0, // Will be updated by inventory adjustment  
+      reason: 'transfer',
+      transferId: transferId,
+      notes: `Transfer to warehouse`,
+      createdBy: userId
+    });
+
+    // Inbound to destination warehouse
+    await this.createStockMovement({
+      warehouseId: transfer.toWarehouseId,
+      productId: transfer.productId,
+      movementType: 'transfer_in',
+      quantity: transfer.quantity,
+      previousQuantity: 0, // Will be updated by inventory adjustment
+      newQuantity: 0, // Will be updated by inventory adjustment
+      reason: 'transfer',
+      transferId: transferId,
+      notes: `Transfer from warehouse`,
+      createdBy: userId
+    });
+
+    // Update inventory levels
+    await this.adjustInventoryWithMovement(
+      transfer.fromWarehouseId,
+      transfer.productId,
+      -transfer.quantity,
+      'transfer',
+      userId,
+      `Transfer to warehouse (${transferId})`
+    );
+
+    await this.adjustInventoryWithMovement(
+      transfer.toWarehouseId,
+      transfer.productId,
+      transfer.quantity,
+      'transfer',
+      userId,
+      `Transfer from warehouse (${transferId})`
+    );
+
+    return updatedTransfer;
+  }
+
+  // Enhanced inventory operations with stock tracking
+  async adjustInventoryWithMovement(
+    warehouseId: string, 
+    productId: string, 
+    quantityChange: number, 
+    reason: string, 
+    userId: string, 
+    notes?: string
+  ): Promise<{ inventory: Inventory; movement: StockMovement }> {
+    // Get current inventory
+    const [currentInventory] = await db
+      .select()
+      .from(inventory)
+      .where(and(
+        eq(inventory.warehouseId, warehouseId),
+        eq(inventory.productId, productId)
+      ));
+
+    const previousQuantity = currentInventory?.quantity || 0;
+    const newQuantity = Math.max(0, previousQuantity + quantityChange); // Prevent negative inventory
+
+    // Update or create inventory record
+    const [updatedInventory] = await db
+      .insert(inventory)
+      .values({ 
+        warehouseId, 
+        productId, 
+        quantity: newQuantity,
+        updatedAt: new Date()
+      })
+      .onConflictDoUpdate({
+        target: [inventory.warehouseId, inventory.productId],
+        set: { 
+          quantity: newQuantity, 
+          updatedAt: new Date() 
+        }
+      })
+      .returning();
+
+    // Create stock movement record
+    const movement = await this.createStockMovement({
+      warehouseId,
+      productId,
+      movementType: quantityChange > 0 ? 'inbound' : 'outbound',
+      quantity: Math.abs(quantityChange),
+      previousQuantity,
+      newQuantity,
+      reason,
+      notes,
+      createdBy: userId
+    });
+
+    return { inventory: updatedInventory, movement };
+  }
+
+  async transferInventoryBetweenWarehouses(
+    fromWarehouseId: string,
+    toWarehouseId: string,
+    productId: string,
+    quantity: number,
+    userId: string,
+    notes?: string
+  ): Promise<WarehouseTransfer> {
+    // Check if source warehouse has enough inventory
+    const [sourceInventory] = await db
+      .select()
+      .from(inventory)
+      .where(and(
+        eq(inventory.warehouseId, fromWarehouseId),
+        eq(inventory.productId, productId)
+      ));
+
+    if (!sourceInventory || sourceInventory.quantity < quantity) {
+      throw new Error("Insufficient inventory in source warehouse");
+    }
+
+    // Create transfer request
+    const transfer = await this.createWarehouseTransfer({
+      fromWarehouseId,
+      toWarehouseId,
+      productId,
+      quantity,
+      requestedBy: userId,
+      notes
+    });
+
+    return transfer;
+  }
+
+  // Warehouse reports
+  async getWarehouseReport(warehouseId: string, dateFrom?: string, dateTo?: string): Promise<{
+    basicInfo: Warehouse;
+    inventoryStats: {
+      totalProducts: number;
+      totalValue: string;
+      lowStockItems: number;
+      outOfStockItems: number;
+    };
+    movementStats: {
+      totalInbound: number;
+      totalOutbound: number;
+      totalTransfersIn: number;
+      totalTransfersOut: number;
+    };
+    recentMovements: StockMovementWithDetails[];
+    pendingTransfers: WarehouseTransferWithDetails[];
+  }> {
+    // Get warehouse basic info
+    const [basicInfo] = await db
+      .select()
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId));
+
+    if (!basicInfo) throw new Error("Warehouse not found");
+
+    // Get inventory stats
+    const inventoryQuery = db
+      .select({
+        totalProducts: count(),
+        totalValue: sql<string>`COALESCE(SUM(${inventory.quantity} * COALESCE(${products.unitPrice}, 0)), 0)`,
+        lowStockItems: sql<number>`COUNT(CASE WHEN ${inventory.quantity} <= COALESCE(${inventory.minStockLevel}, 10) THEN 1 END)`,
+        outOfStockItems: sql<number>`COUNT(CASE WHEN ${inventory.quantity} = 0 THEN 1 END)`
+      })
+      .from(inventory)
+      .leftJoin(products, eq(inventory.productId, products.id))
+      .where(eq(inventory.warehouseId, warehouseId));
+
+    const [inventoryStats] = await inventoryQuery;
+
+    // Get movement stats
+    const movementConditions = [eq(stockMovements.warehouseId, warehouseId)];
+    if (dateFrom) movementConditions.push(gte(stockMovements.createdAt, new Date(dateFrom)));
+    if (dateTo) movementConditions.push(lte(stockMovements.createdAt, new Date(dateTo)));
+
+    const [movementStats] = await db
+      .select({
+        totalInbound: sql<number>`COUNT(CASE WHEN ${stockMovements.movementType} IN ('inbound', 'transfer_in') THEN 1 END)`,
+        totalOutbound: sql<number>`COUNT(CASE WHEN ${stockMovements.movementType} IN ('outbound', 'transfer_out') THEN 1 END)`,
+        totalTransfersIn: sql<number>`COUNT(CASE WHEN ${stockMovements.movementType} = 'transfer_in' THEN 1 END)`,
+        totalTransfersOut: sql<number>`COUNT(CASE WHEN ${stockMovements.movementType} = 'transfer_out' THEN 1 END)`
+      })
+      .from(stockMovements)
+      .where(and(...movementConditions));
+
+    // Get recent movements (last 10)
+    const recentMovements = await this.getStockMovements(warehouseId);
+    const recent10 = recentMovements.slice(0, 10);
+
+    // Get pending transfers
+    const pendingTransfers = await db
+      .select()
+      .from(warehouseTransfers)
+      .where(
+        and(
+          or(
+            eq(warehouseTransfers.fromWarehouseId, warehouseId),
+            eq(warehouseTransfers.toWarehouseId, warehouseId)
+          ),
+          eq(warehouseTransfers.status, 'pending')
+        )
+      );
+
+    const pendingTransferDetails = await this.getWarehouseTransfers(warehouseId);
+    const pendingOnly = pendingTransferDetails.filter(t => t.status === 'pending');
+
+    return {
+      basicInfo,
+      inventoryStats: {
+        totalProducts: inventoryStats.totalProducts,
+        totalValue: inventoryStats.totalValue || "0",
+        lowStockItems: inventoryStats.lowStockItems,
+        outOfStockItems: inventoryStats.outOfStockItems
+      },
+      movementStats: {
+        totalInbound: movementStats.totalInbound,
+        totalOutbound: movementStats.totalOutbound,
+        totalTransfersIn: movementStats.totalTransfersIn,
+        totalTransfersOut: movementStats.totalTransfersOut
+      },
+      recentMovements: recent10,
+      pendingTransfers: pendingOnly
+    };
   }
 }
 
