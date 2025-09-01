@@ -18,7 +18,7 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Package, Plus, Edit, Trash2, BarChart3, DollarSign, Calculator } from "lucide-react";
+import { Package, Plus, Edit, Trash2, Calculator, Search, Filter, BarChart3, DollarSign, Package2 } from "lucide-react";
 
 const productSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -34,35 +34,48 @@ const productSchema = z.object({
   supplier: z.string().optional(),
 });
 
-type Product = {
-  id: string;
-  name: string;
-  sku: string;
-  description: string | null;
-  category: string;
-  unitPrice: string | null;
-  costPrice: string | null;
-  weight: string | null;
-  dimensions: string | null;
-  barcode: string | null;
-  brand: string | null;
-  supplier: string | null;
-  isActive: boolean;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-};
+import type { Product, ProductWithInventory, InventoryWithDetails } from "@shared/schema";
 
 export default function Products() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const { toast } = useToast();
-  const { logoutIfUnauthorized } = useAuth();
+  const { user } = useAuth();
+  
+  const logoutIfUnauthorized = (error: Error) => {
+    if (error.message.includes('Unauthorized')) {
+      // Handle unauthorized error
+    }
+  };
 
-  const { data: products = [], isLoading } = useQuery<Product[]>({
+  const { data: products = [], isLoading } = useQuery<ProductWithInventory[]>({
     queryKey: ["/api/products"],
     retry: false,
   });
+
+  // Filter products based on search and category
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = searchTerm === "" || 
+      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (product.brand && product.brand.toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    const matchesCategory = categoryFilter === "" || product.category === categoryFilter;
+    
+    return matchesSearch && matchesCategory;
+  });
+
+  const getTotalInventory = (product: ProductWithInventory) => {
+    return product.inventory?.reduce((total, inv) => total + inv.quantity, 0) || 0;
+  };
+
+  const getTotalValue = (product: ProductWithInventory) => {
+    const totalQty = getTotalInventory(product);
+    const price = parseFloat(product.unitPrice || "0");
+    return (totalQty * price).toFixed(2);
+  };
 
   const createProductForm = useForm<z.infer<typeof productSchema>>({
     resolver: zodResolver(productSchema),
@@ -80,7 +93,7 @@ export default function Products() {
 
   const createProductMutation = useMutation({
     mutationFn: async (data: z.infer<typeof productSchema>) => {
-      const response = await apiRequest("/api/products", {
+      const response = await fetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -112,7 +125,7 @@ export default function Products() {
 
   const updateProductMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: Partial<z.infer<typeof productSchema>> }) => {
-      const response = await apiRequest(`/api/products/${id}`, {
+      const response = await fetch(`/api/products/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -144,7 +157,7 @@ export default function Products() {
 
   const deleteProductMutation = useMutation({
     mutationFn: async (id: string) => {
-      const response = await apiRequest(`/api/products/${id}`, {
+      const response = await fetch(`/api/products/${id}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -205,26 +218,19 @@ export default function Products() {
   };
 
   return (
-    <div className="flex-1 overflow-hidden">
-      <Header 
-        title="Product Management" 
-        subtitle="Manage your product catalog with detailed information and pricing"
-      />
-      <div className="flex-1 overflow-auto p-6">
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">Products</h2>
-            <p className="text-muted-foreground">
-              Manage your product inventory with comprehensive details
-            </p>
-          </div>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Product
-              </Button>
-            </DialogTrigger>
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold" data-testid="page-title">Product Management</h1>
+          <p className="text-muted-foreground">Manage your product catalog and inventory</p>
+        </div>
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="button-create-product">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Product
+            </Button>
+          </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Create New Product</DialogTitle>
@@ -434,18 +440,124 @@ export default function Products() {
               </Form>
             </DialogContent>
           </Dialog>
-        </div>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="h-5 w-5" />
+            Filters
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <label htmlFor="search" className="text-sm font-medium">Search Products</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                <Input
+                  id="search"
+                  placeholder="Search by name, SKU, or brand..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                  data-testid="input-search-products"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="category" className="text-sm font-medium">Category</label>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-[180px]" data-testid="select-filter-category">
+                  <SelectValue placeholder="All categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All categories</SelectItem>
+                  <SelectItem value="electronics">Electronics</SelectItem>
+                  <SelectItem value="clothing">Clothing</SelectItem>
+                  <SelectItem value="books">Books</SelectItem>
+                  <SelectItem value="home">Home</SelectItem>
+                  <SelectItem value="beauty">Beauty</SelectItem>
+                  <SelectItem value="sports">Sports</SelectItem>
+                  <SelectItem value="toys">Toys</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {(searchTerm || categoryFilter) && (
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setSearchTerm("");
+                  setCategoryFilter("");
+                }}
+                data-testid="button-clear-filters"
+              >
+                Clear Filters
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Products Overview Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Products</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="metric-total-products">{products.length}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Products</CardTitle>
+            <Package2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="metric-active-products">
+              {products.filter(p => p.isActive).length}
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Package className="w-5 h-5" />
-              Product Catalog
-            </CardTitle>
-            <CardDescription>
-              Comprehensive product listing with pricing and inventory details
-            </CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Inventory</CardTitle>
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="metric-total-inventory">
+              {products.reduce((total, product) => total + getTotalInventory(product), 0)}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Inventory Value</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold" data-testid="metric-inventory-value">
+              ₹{products.reduce((total, product) => total + parseFloat(getTotalValue(product)), 0).toFixed(2)}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Products Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            Products ({filteredProducts.length})
+          </CardTitle>
+        </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
@@ -454,9 +566,9 @@ export default function Products() {
                     <TableHead>Product</TableHead>
                     <TableHead>SKU</TableHead>
                     <TableHead>Category</TableHead>
-                    <TableHead>Cost Price</TableHead>
-                    <TableHead>Selling Price</TableHead>
-                    <TableHead>Profit Margin</TableHead>
+                    <TableHead>Price</TableHead>
+                    <TableHead>Inventory</TableHead>
+                    <TableHead>Value</TableHead>
                     <TableHead>Brand</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Actions</TableHead>
@@ -480,7 +592,7 @@ export default function Products() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    products.map((product) => (
+                    filteredProducts.map((product) => (
                       <TableRow key={product.id}>
                         <TableCell>
                           <div>
@@ -498,23 +610,14 @@ export default function Products() {
                             {product.category}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          {product.costPrice ? `₹${parseFloat(product.costPrice).toLocaleString()}` : "—"}
+                        <TableCell data-testid={`price-${product.id}`}>
+                          ₹{parseFloat(product.unitPrice || "0").toFixed(2)}
                         </TableCell>
-                        <TableCell>
-                          {product.unitPrice ? `₹${parseFloat(product.unitPrice).toLocaleString()}` : "—"}
+                        <TableCell data-testid={`inventory-${product.id}`}>
+                          {getTotalInventory(product)} units
                         </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Calculator className="w-3 h-3 text-muted-foreground" />
-                            <span className={`text-sm font-medium ${
-                              calculateProfitMargin(product.unitPrice, product.costPrice) !== "N/A" 
-                                ? "text-green-600" 
-                                : "text-muted-foreground"
-                            }`}>
-                              {calculateProfitMargin(product.unitPrice, product.costPrice)}
-                            </span>
-                          </div>
+                        <TableCell data-testid={`value-${product.id}`}>
+                          ₹{getTotalValue(product)}
                         </TableCell>
                         <TableCell>{product.brand || "—"}</TableCell>
                         <TableCell>
@@ -530,6 +633,7 @@ export default function Products() {
                                   variant="ghost" 
                                   size="sm"
                                   onClick={() => openEditDialog(product)}
+                                  data-testid={`button-edit-${product.id}`}
                                 >
                                   <Edit className="w-4 h-4" />
                                 </Button>
@@ -661,7 +765,6 @@ export default function Products() {
             </div>
           </CardContent>
         </Card>
-      </div>
     </div>
   );
 }

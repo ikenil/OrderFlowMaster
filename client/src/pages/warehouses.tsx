@@ -118,10 +118,11 @@ export default function WarehousesPage() {
 
   // Mutations
   const createWarehouseMutation = useMutation({
-    mutationFn: (data: WarehouseFormData) => apiRequest("/api/warehouses", {
+    mutationFn: (data: WarehouseFormData) => fetch("/api/warehouses", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
-    }),
+    }).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/warehouses"] });
       setIsCreateDialogOpen(false);
@@ -131,10 +132,11 @@ export default function WarehousesPage() {
 
   const updateWarehouseMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: WarehouseFormData }) => 
-      apiRequest(`/api/warehouses/${id}`, {
+      fetch(`/api/warehouses/${id}`, {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
-      }),
+      }).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/warehouses"] });
       setEditingWarehouse(null);
@@ -143,10 +145,11 @@ export default function WarehousesPage() {
   });
 
   const adjustInventoryMutation = useMutation({
-    mutationFn: (data: InventoryAdjustmentData) => apiRequest("/api/inventory/adjust", {
+    mutationFn: (data: InventoryAdjustmentData) => fetch("/api/inventory/adjust", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
-    }),
+    }).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stock-movements"] });
@@ -156,10 +159,11 @@ export default function WarehousesPage() {
   });
 
   const createTransferMutation = useMutation({
-    mutationFn: (data: WarehouseTransferData) => apiRequest("/api/warehouse-transfers", {
+    mutationFn: (data: WarehouseTransferData) => fetch("/api/warehouse-transfers", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
-    }),
+    }).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse-transfers"] });
       setIsTransferDialogOpen(false);
@@ -168,9 +172,9 @@ export default function WarehousesPage() {
   });
 
   const approveTransferMutation = useMutation({
-    mutationFn: (transferId: string) => apiRequest(`/api/warehouse-transfers/${transferId}/approve`, {
+    mutationFn: (transferId: string) => fetch(`/api/warehouse-transfers/${transferId}/approve`, {
       method: "PATCH",
-    }),
+    }).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse-transfers"] });
       toast({ title: "Success", description: "Transfer approved successfully" });
@@ -178,9 +182,9 @@ export default function WarehousesPage() {
   });
 
   const processTransferMutation = useMutation({
-    mutationFn: (transferId: string) => apiRequest(`/api/warehouse-transfers/${transferId}/process`, {
+    mutationFn: (transferId: string) => fetch(`/api/warehouse-transfers/${transferId}/process`, {
       method: "POST",
-    }),
+    }).then(res => res.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse-transfers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
@@ -432,7 +436,7 @@ export default function WarehousesPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold" data-testid="metric-total-products">
-                        {warehouseReport?.inventoryStats?.totalProducts || 0}
+                        {(warehouseReport as any)?.inventoryStats?.totalProducts || 0}
                       </div>
                     </CardContent>
                   </Card>
@@ -444,7 +448,7 @@ export default function WarehousesPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold" data-testid="metric-inventory-value">
-                        ${warehouseReport?.inventoryStats?.totalValue || "0"}
+                        ${(warehouseReport as any)?.inventoryStats?.totalValue || "0"}
                       </div>
                     </CardContent>
                   </Card>
@@ -456,7 +460,7 @@ export default function WarehousesPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold text-yellow-600" data-testid="metric-low-stock">
-                        {warehouseReport?.inventoryStats?.lowStockItems || 0}
+                        {(warehouseReport as any)?.inventoryStats?.lowStockItems || 0}
                       </div>
                     </CardContent>
                   </Card>
@@ -468,7 +472,7 @@ export default function WarehousesPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold text-red-600" data-testid="metric-out-stock">
-                        {warehouseReport?.inventoryStats?.outOfStockItems || 0}
+                        {(warehouseReport as any)?.inventoryStats?.outOfStockItems || 0}
                       </div>
                     </CardContent>
                   </Card>
@@ -478,7 +482,7 @@ export default function WarehousesPage() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-medium">Recent Stock Movements</h3>
                   <div className="space-y-2">
-                    {warehouseReport?.recentMovements?.slice(0, 5).map((movement, index) => (
+                    {((warehouseReport as any)?.recentMovements || []).slice(0, 5).map((movement: any, index: number) => (
                       <div key={movement.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
                         <div className="flex items-center gap-3">
                           {getMovementTypeIcon(movement.movementType)}
@@ -495,7 +499,7 @@ export default function WarehousesPage() {
                             {movement.quantity}
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            {new Date(movement.createdAt).toLocaleDateString()}
+                            {movement.createdAt ? new Date(movement.createdAt).toLocaleDateString() : 'N/A'}
                           </p>
                         </div>
                       </div>
@@ -681,7 +685,7 @@ export default function WarehousesPage() {
                       {stockMovements.slice(0, 20).map((movement) => (
                         <TableRow key={movement.id} data-testid={`row-movement-${movement.id}`}>
                           <TableCell>
-                            {new Date(movement.createdAt).toLocaleDateString()}
+                            {movement.createdAt ? new Date(movement.createdAt).toLocaleDateString() : 'N/A'}
                           </TableCell>
                           <TableCell className="font-medium">{movement.product.name}</TableCell>
                           <TableCell>
